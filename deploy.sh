@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Deploy the Utility Providers Agent to Amazon Bedrock AgentCore Runtime.
+# Deploy the Utility Bot to Amazon Bedrock AgentCore Runtime.
 #
-# Scaffolds an AgentCore CLI project (agentcore-project/UtilProviders/), wires
+# Scaffolds an AgentCore CLI project (agentcore-project/UtilityBot/), wires
 # our source files in as a "Bring your own code" agent, and deploys it via
 # `agentcore deploy` (which provisions an IAM execution role + a
 # AWS::BedrockAgentCore::Runtime resource in your AWS account via CloudFormation).
@@ -21,11 +21,22 @@
 
 set -euo pipefail
 
-PROJECT_NAME="UtilProviders"
+# Work around a Windows-specific uv bug: the CDK build stages Python deps
+# into agentcore-project/.../agentcore/.cache/ by hardlinking from uv's
+# global package cache. If either path is inside a cloud-synced folder
+# (OneDrive, etc.), Windows' Cloud Files API rejects the hardlink with
+# "os error 396: The cloud operation cannot be performed on a file with
+# incompatible hardlinks." UV_LINK_MODE=copy makes uv copy instead of
+# hardlink - slightly slower, always works. Harmless (and a no-op) on
+# platforms that don't hit this. See:
+# https://docs.astral.sh/uv/reference/environment/#uv_link_mode
+export UV_LINK_MODE=copy
+
+PROJECT_NAME="UtilityBot"
 AGENT_NAME="UtilityAgent"
 PROJECT_DIR="agentcore-project/${PROJECT_NAME}"
 APP_DIR="${PROJECT_DIR}/app/${AGENT_NAME}"
-SOURCE_FILES=(main.py utility_provider_tools.py steering_handlers.py hooks.py)
+SOURCE_FILES=(main.py mcp_providers.py steering_handlers.py hooks.py)
 
 mode="${1:-deploy}"
 
@@ -108,7 +119,7 @@ main() {
             echo "== Deployed. Fetching status =="
             (cd "$PROJECT_DIR" && agentcore status --json)
             echo
-            echo "Try it:  (cd $PROJECT_DIR && agentcore invoke \"What providers are available in zip code 78701?\")"
+            echo "Try it:  (cd $PROJECT_DIR && agentcore invoke \"What electricity plans are available in zip code 78701?\")"
             ;;
         *)
             echo "Unknown mode: $mode (expected: deploy, --dry-run, --diff, --teardown)" >&2

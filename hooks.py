@@ -1,6 +1,6 @@
-"""Shared hooks for the Utility Providers Agent.
+"""Shared hooks for the Utility Bot.
 
-Used by both the local chat.py CLI and the deployed main.py entrypoint.
+Used by the main.py entrypoint.
 """
 
 from strands.hooks import (

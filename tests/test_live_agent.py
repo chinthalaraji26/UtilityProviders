@@ -9,7 +9,7 @@ Two modes, chosen by which env vars are set:
 - AGENT_RUNTIME_ARN set: invokes the deployed AgentCore Runtime via boto3
   (what DEPLOY.md's smoke test also does after `agentcore deploy`).
 - Neither set: falls back to constructing the local agent in-process
-  (same path chat.py/main.py use) and calling it directly - still a real
+  (same path main.py uses) and calling it directly - still a real
   Bedrock call, just without a deployed runtime.
 """
 
@@ -57,25 +57,25 @@ def session_id():
     return f"live-test-session-{uuid.uuid4()}"
 
 
-def test_find_providers_flow(session_id):
-    result = _invoke("What providers are available in zip code 78701?", session_id)
-    assert "Austin" in result
-    assert "Google Fiber" in result or "Spectrum" in result
+def test_search_plans_flow(session_id):
+    result = _invoke("What electricity plans are available in zip code 78701?", session_id)
+    # 78701 is downtown Austin, TX - Utilify should recognize the area even if
+    # the specific plans returned change over time.
+    assert "78701" in result or "austin" in result.lower()
 
 
-def test_budget_estimate_flow(session_id):
-    result = _invoke(
-        "For zip 78701, use Austin Water for water and Google Fiber for internet. What's my monthly budget?",
-        session_id,
-    )
-    assert "$" in result
-    # The estimate should surface the real per-household caveat, not a hard guarantee.
-    assert "vary" in result.lower() or "typical" in result.lower()
-
-
-def test_rejects_made_up_provider(session_id):
-    result = _invoke(
-        "In zip 78701, estimate my budget using 'Totally Fake ISP' for internet.",
-        session_id,
-    )
-    assert "Fake ISP" not in result or "not" in result.lower() or "isn't" in result.lower() or "no" in result.lower()
+def test_enrollment_requires_confirmation(session_id):
+    # A single-shot "sign me up" with no prior confirmation in this session
+    # must not be treated as consent - EnrollmentConfirmationHandler should
+    # block utilify_initiate_signup, so the agent may only ask for more
+    # info / offer to help, never claim the enrollment already happened.
+    # (A plain "signed up" substring check is too blunt - "help you get
+    # signed up" is a safe, forward-looking offer, not a completion claim.)
+    result = _invoke("Sign me up for electricity in zip code 78701", session_id)
+    lower = result.lower()
+    completion_claims = [
+        "you're enrolled", "you are enrolled", "successfully enrolled",
+        "you're signed up", "you are signed up", "successfully signed up",
+        "sign-up complete", "signup complete", "enrollment complete", "enrollment is complete",
+    ]
+    assert not any(phrase in lower for phrase in completion_claims), result

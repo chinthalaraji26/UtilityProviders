@@ -1,9 +1,9 @@
 # Deploying to Amazon Bedrock AgentCore Runtime
 
-Deploys `main.py` (the same agent as `chat.py` - tools, rate-limiter hook,
-skills, and steering guardrails, minus local file-based session persistence)
+Deploys `main.py` (tools, rate-limiter hook, skills, and steering guardrails)
 to **Amazon Bedrock AgentCore Runtime**, a managed, serverless runtime for
-hosting agents.
+hosting agents. `python main.py` runs the exact same agent locally - see
+README.md.
 
 ## What this creates in your AWS account
 
@@ -28,6 +28,13 @@ charges. Nothing here is free-tier-guaranteed - check current
 - **AWS credentials** with Bedrock, AgentCore, IAM, and CloudFormation access, and the account/region already [CDK-bootstrapped](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping.html) (one-time per account/region; `deploy.sh` does not do this for you)
 - Do **not** have `bedrock-agentcore-starter-toolkit` installed - it ships an older, conflicting `agentcore` CLI
 
+`deploy.sh` sets `UV_LINK_MODE=copy` for you (works around a Windows-only
+`uv` hardlink failure - see the comment in the script). If you run
+`agentcore deploy`/`agentcore invoke`/etc. directly instead of through
+`deploy.sh` and hit `os error 396: The cloud operation cannot be performed
+on a file with incompatible hardlinks`, set that same env var yourself first
+(`$env:UV_LINK_MODE = "copy"` in PowerShell, `export UV_LINK_MODE=copy` in bash).
+
 ## How do I deploy it?
 
 ```bash
@@ -41,8 +48,8 @@ The script is idempotent for the scaffolding steps (skips work already done)
 but always re-applies on `deploy` - that's how you push a code change to an
 already-deployed agent. It:
 
-1. Runs `agentcore create` to scaffold `agentcore-project/UtilProviders/` (a CDK app the CLI manages - gitignored, regenerate anytime with this script).
-2. Copies `main.py`, `utility_provider_tools.py`, `steering_handlers.py`, `hooks.py`, and `skills/` into `agentcore-project/UtilProviders/app/UtilityAgent/`.
+1. Runs `agentcore create` to scaffold `agentcore-project/UtilityBot/` (a CDK app the CLI manages - gitignored, regenerate anytime with this script).
+2. Copies `main.py`, `mcp_providers.py`, `steering_handlers.py`, `hooks.py`, and `skills/` into `agentcore-project/UtilityBot/app/UtilityAgent/`.
 3. Runs `uv init` / `uv add` in that folder to produce the `pyproject.toml` the CodeZip build needs.
 4. Runs `agentcore add agent` to register it as a "Bring your own code" Strands agent on Bedrock.
 5. Runs `agentcore deploy -y` to synthesize and apply the CloudFormation stack.
@@ -50,11 +57,11 @@ already-deployed agent. It:
 ### Invoke it
 
 ```bash
-cd agentcore-project/UtilProviders
-agentcore invoke "What providers are available in zip code 78701?"
+cd agentcore-project/UtilityBot
+agentcore invoke "What electricity plans are available in zip code 78701?"
 
 # Keep context across calls with --session-id (must be >= 33 characters)
-agentcore invoke --session-id utility-customer-session-000001 "I want Google Fiber for internet - what's my budget?"
+agentcore invoke --session-id utility-customer-session-000001 "Compare the top 3 - which has the best promo?"
 ```
 
 ### Invoke from code (boto3)
@@ -68,7 +75,7 @@ client = boto3.client("bedrock-agentcore", region_name="us-east-1")
 response = client.invoke_agent_runtime(
     agentRuntimeArn="<ARN from `agentcore status`>",
     runtimeSessionId=str(uuid.uuid4()),
-    payload=json.dumps({"prompt": "What providers are available in zip code 78701?"}).encode(),
+    payload=json.dumps({"prompt": "What electricity plans are available in zip code 78701?"}).encode(),
     qualifier="DEFAULT",
 )
 print("".join(chunk.decode("utf-8") for chunk in response.get("response", [])))
@@ -77,7 +84,7 @@ print("".join(chunk.decode("utf-8") for chunk in response.get("response", [])))
 ### Check status and logs
 
 ```bash
-cd agentcore-project/UtilProviders
+cd agentcore-project/UtilityBot
 agentcore status
 agentcore logs
 ```

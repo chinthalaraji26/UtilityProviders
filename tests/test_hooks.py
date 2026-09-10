@@ -18,7 +18,7 @@ def tool_call_event(name: str) -> SimpleNamespace:
 def test_allows_calls_up_to_the_limit():
     hook = RateLimiterHook(max_calls=3)
     for _ in range(3):
-        event = tool_call_event("find_providers")
+        event = tool_call_event("utilify_search_utility_providers")
         hook.check(event)
         assert event.cancel_tool is None
 
@@ -26,9 +26,9 @@ def test_allows_calls_up_to_the_limit():
 def test_blocks_calls_beyond_the_limit():
     hook = RateLimiterHook(max_calls=2)
     for _ in range(2):
-        hook.check(tool_call_event("get_promotions"))
+        hook.check(tool_call_event("utilify_get_promotions"))
 
-    event = tool_call_event("get_promotions")
+    event = tool_call_event("utilify_get_promotions")
     hook.check(event)
     assert event.cancel_tool is not None
     assert "2-call limit" in event.cancel_tool
@@ -36,19 +36,19 @@ def test_blocks_calls_beyond_the_limit():
 
 def test_counts_are_tracked_per_tool_independently():
     hook = RateLimiterHook(max_calls=1)
-    hook.check(tool_call_event("find_providers"))
+    hook.check(tool_call_event("utilify_search_utility_providers"))
 
-    other_event = tool_call_event("get_promotions")
+    other_event = tool_call_event("utilify_get_promotions")
     hook.check(other_event)
     assert other_event.cancel_tool is None  # different tool, own count
 
 
 def test_reset_clears_counts_between_turns():
     hook = RateLimiterHook(max_calls=1)
-    hook.check(tool_call_event("find_providers"))
+    hook.check(tool_call_event("utilify_search_utility_providers"))
 
     hook.reset(event=None)
 
-    event = tool_call_event("find_providers")
+    event = tool_call_event("utilify_search_utility_providers")
     hook.check(event)
     assert event.cancel_tool is None  # count was reset, so this is call 1/1 again
