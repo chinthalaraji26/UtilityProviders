@@ -3,8 +3,7 @@
 Deploys `main.py` (the same agent as `chat.py` - tools, rate-limiter hook,
 skills, and steering guardrails, minus local file-based session persistence)
 to **Amazon Bedrock AgentCore Runtime**, a managed, serverless runtime for
-hosting agents. Follows Module 5 of the
-[Strands Agents Hands-On Workshop](https://github.com/aws-samples/sample-strands-agents-hands-on-workshop/tree/main/samples/05-deploy).
+hosting agents.
 
 ## What this creates in your AWS account
 
