@@ -1,0 +1,2 @@
+-r requirements-deploy.txt
+pytest>=8.0.0
