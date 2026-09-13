@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Deploy the Utility Bot to Amazon Bedrock AgentCore Runtime.
+# Deploy the Movers Helper Agent to Amazon Bedrock AgentCore Runtime.
 #
-# Scaffolds an AgentCore CLI project (agentcore-project/UtilityBot/), wires
+# Scaffolds an AgentCore CLI project (agentcore-project/MoversHelperAgent/), wires
 # our source files in as a "Bring your own code" agent, and deploys it via
 # `agentcore deploy` (which provisions an IAM execution role + a
 # AWS::BedrockAgentCore::Runtime resource in your AWS account via CloudFormation).
+# On a real deploy, also runs scripts/deploy_rate_limiter.py to provision the
+# Lambda + DynamoDB table behind hooks.RateLimiterHook's cross-container mode -
+# see that script's docstring and ARCHITECTURE.md.
 #
 # Safe to re-run: each step is skipped if its output already exists, except
 # the actual `agentcore deploy` call, which always re-applies (that's how you
@@ -17,7 +20,9 @@
 #   ./deploy.sh --teardown      # remove the deployed runtime from AWS
 #
 # Prerequisites: Node.js 20+, the `agentcore` CLI (npm i -g @aws/agentcore),
-# `uv`, and AWS credentials with Bedrock + AgentCore + CloudFormation access.
+# `uv`, Python 3 with boto3 (requirements-deploy.txt) for the rate-limiter
+# provisioning step, and AWS credentials with Bedrock + AgentCore +
+# CloudFormation + DynamoDB + Lambda + IAM access.
 
 set -euo pipefail
 
@@ -32,13 +37,15 @@ set -euo pipefail
 # https://docs.astral.sh/uv/reference/environment/#uv_link_mode
 export UV_LINK_MODE=copy
 
-PROJECT_NAME="UtilityBot"
-AGENT_NAME="UtilityAgent"
+PROJECT_NAME="MoversHelperAgent"
+AGENT_NAME="MoversHelperAgent"
 PROJECT_DIR="agentcore-project/${PROJECT_NAME}"
 APP_DIR="${PROJECT_DIR}/app/${AGENT_NAME}"
 SOURCE_FILES=(main.py mcp_providers.py steering_handlers.py hooks.py)
 
 mode="${1:-deploy}"
+
+PYTHON_BIN=""
 
 check_prereqs() {
     for cmd in node npm agentcore uv; do
@@ -48,6 +55,21 @@ check_prereqs() {
             exit 1
         fi
     done
+
+    for cmd in python3 python; do
+        # command -v only checks PATH, not that the binary actually runs - on
+        # Windows, `python3` often resolves to a Microsoft Store shim that
+        # exists on PATH but errors out instead of running, if no real
+        # Python is installed under that name. Actually invoke it.
+        if command -v "$cmd" >/dev/null 2>&1 && "$cmd" -c "" >/dev/null 2>&1; then
+            PYTHON_BIN="$cmd"
+            break
+        fi
+    done
+    if [ -z "$PYTHON_BIN" ]; then
+        echo "Missing prerequisite: a working python3/python (needed for scripts/deploy_rate_limiter.py)" >&2
+        exit 1
+    fi
 }
 
 scaffold_project() {
@@ -79,8 +101,24 @@ sync_app_source() {
     fi
 }
 
+is_agent_registered() {
+    # A plain grep for "name": "$AGENT_NAME" would also match agentcore.json's
+    # top-level project name (same field, same string when PROJECT_NAME and
+    # AGENT_NAME match, as they do here) - check specifically inside the
+    # "runtimes" array, where a registered agent's entry actually lives.
+    "$PYTHON_BIN" -c "
+import json, sys
+try:
+    with open('$PROJECT_DIR/agentcore/agentcore.json') as f:
+        data = json.load(f)
+except FileNotFoundError:
+    sys.exit(1)
+sys.exit(0 if any(r.get('name') == '$AGENT_NAME' for r in data.get('runtimes', [])) else 1)
+"
+}
+
 register_agent() {
-    if grep -q "\"name\": \"$AGENT_NAME\"" "$PROJECT_DIR/agentcore/agentcore.json" 2>/dev/null; then
+    if is_agent_registered; then
         echo "== Agent '$AGENT_NAME' already registered, skipping add =="
         return
     fi
@@ -89,6 +127,23 @@ register_agent() {
         --name "$AGENT_NAME" \
         --type byo --language Python --framework Strands --model-provider Bedrock \
         --code-location "app/${AGENT_NAME}" --entrypoint main.py --json)
+}
+
+deploy_rate_limiter() {
+    # Provisions the Lambda + DynamoDB table hooks.RateLimiterHook can use for
+    # cross-container rate limiting, and grants the just-deployed agent's
+    # execution role permission to invoke it. Independent of the
+    # agentcore-managed CDK app - see scripts/deploy_rate_limiter.py.
+    echo "== Provisioning rate-limiter Lambda + DynamoDB table =="
+    "$PYTHON_BIN" scripts/deploy_rate_limiter.py --project-dir "$PROJECT_DIR"
+}
+
+teardown_rate_limiter() {
+    # Must run before `agentcore remove agent` / the teardown `agentcore
+    # deploy` below: it strips the inline policy this adds to the agent's
+    # execution role, and IAM refuses to delete a role that still has one.
+    echo "== Removing rate-limiter Lambda + DynamoDB table =="
+    "$PYTHON_BIN" scripts/deploy_rate_limiter.py --project-dir "$PROJECT_DIR" --teardown
 }
 
 main() {
@@ -107,6 +162,7 @@ main() {
             (cd "$PROJECT_DIR" && agentcore deploy --diff --json)
             ;;
         --teardown)
+            teardown_rate_limiter
             echo "== Removing agent from local config =="
             (cd "$PROJECT_DIR" && agentcore remove agent --name "$AGENT_NAME" -y --json)
             echo "== Applying teardown to AWS =="
@@ -115,6 +171,7 @@ main() {
         deploy)
             echo "== Deploying to AWS (this provisions billed resources) =="
             (cd "$PROJECT_DIR" && agentcore deploy -y --json)
+            deploy_rate_limiter
             echo
             echo "== Deployed. Fetching status =="
             (cd "$PROJECT_DIR" && agentcore status --json)

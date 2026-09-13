@@ -1,4 +1,4 @@
-"""MCP tool provider(s) for the Utility Bot.
+"""MCP tool provider(s) for the Movers Helper Agent.
 
 Utilify (https://utilify.io) runs a public MCP server that searches and
 compares real electricity, internet, gas, water, and trash plans for Texas

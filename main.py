@@ -1,4 +1,4 @@
-"""Utility Bot: entrypoint for Amazon Bedrock AgentCore Runtime.
+"""Movers Helper Agent: entrypoint for Amazon Bedrock AgentCore Runtime.
 
 Wraps the agent - tools, rate-limiter hook, skills, and steering guardrails -
 in a BedrockAgentCoreApp so the `agentcore` CLI can package and deploy it. No
@@ -27,7 +27,7 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 from mcp_providers import utilify_tools
 from steering_handlers import EnrollmentConfirmationHandler, tone_handler
-from hooks import RateLimiterHook
+from hooks import RATE_LIMITER_LAMBDA_NAME, RateLimiterHook
 
 # The model may stream emoji/special characters that some consoles' default
 # encoding (e.g. Windows cp1252) can't print, which otherwise crashes the
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 app = BedrockAgentCoreApp()
 
-SYSTEM_PROMPT = """You are Utility Bot, a helpful assistant. You help customers in Texas:
+SYSTEM_PROMPT = """You are Movers Helper Agent, a helpful assistant. You help customers in Texas:
 1. Search and compare real electricity, internet, gas, water, sewer, trash, and
    home-security plans available at their address, using the Utilify tools (utilify_*).
 2. Check current promotions and deals on those plans.
@@ -74,7 +74,7 @@ def get_agent():
     if _agent is None:
         _agent = Agent(
             tools=[utilify_tools],
-            hooks=[RateLimiterHook(max_calls=4)],
+            hooks=[RateLimiterHook(max_calls=4, lambda_function_name=RATE_LIMITER_LAMBDA_NAME)],
             plugins=[
                 AgentSkills(skills=["./skills"]),
                 EnrollmentConfirmationHandler(),

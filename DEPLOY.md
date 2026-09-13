@@ -14,18 +14,32 @@ Running the real deploy provisions, via CloudFormation (through the AgentCore CD
 | `AWS::IAM::Role` (+ policy)      | Execution role for the runtime - scoped to Bedrock model invocation, CloudWatch Logs, X-Ray, and AgentCore config bundles |
 | `AWS::BedrockAgentCore::Runtime` | The hosted agent runtime itself                                                                                           |
 
+`deploy.sh` then runs `scripts/deploy_rate_limiter.py` directly via boto3
+(outside CloudFormation - see that script's docstring for why), which
+provisions:
+
+| Resource                     | Purpose                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `AWS::DynamoDB::Table`        | Shared call-count storage for `hooks.RateLimiterHook`'s Lambda-backed mode (PAY_PER_REQUEST, TTL-expired rows) |
+| `AWS::Lambda::Function`       | Atomically increments a call's count and reports whether it's over the limit - see `lambdas/rate_limiter/` |
+| `AWS::IAM::Role`              | Execution role for that Lambda (DynamoDB `UpdateItem` on just that table, plus basic CloudWatch Logs)          |
+| Inline policy on the runtime's execution role | Lets the deployed agent invoke that Lambda                                                    |
+
 Code is packaged as a zip (Direct Code Deploy / `CodeZip` - no container) and
 uploaded to the CDK bootstrap staging bucket already in your account; no new
 S3 bucket is created for this stack. **This costs money**: Bedrock model
 inference charges apply per invocation, plus AgentCore Runtime's own hosting
-charges. Nothing here is free-tier-guaranteed - check current
-[AgentCore pricing](https://aws.amazon.com/bedrock/agentcore/pricing/) before deploying.
+charges, plus (usually negligible, pay-per-request) DynamoDB and Lambda
+charges for the rate limiter. Nothing here is free-tier-guaranteed - check
+current [AgentCore pricing](https://aws.amazon.com/bedrock/agentcore/pricing/)
+before deploying.
 
 ## Prerequisites
 
 - **Node.js 20+** and the AgentCore CLI: `npm install -g @aws/agentcore`
 - **uv** ([install](https://docs.astral.sh/uv/getting-started/installation/))
-- **AWS credentials** with Bedrock, AgentCore, IAM, and CloudFormation access, and the account/region already [CDK-bootstrapped](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping.html) (one-time per account/region; `deploy.sh` does not do this for you)
+- **Python 3 with boto3** (`pip install -r requirements-deploy.txt`) - used by `scripts/deploy_rate_limiter.py`
+- **AWS credentials** with Bedrock, AgentCore, IAM, CloudFormation, DynamoDB, and Lambda access, and the account/region already [CDK-bootstrapped](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping.html) (one-time per account/region; `deploy.sh` does not do this for you)
 - Do **not** have `bedrock-agentcore-starter-toolkit` installed - it ships an older, conflicting `agentcore` CLI
 
 `deploy.sh` sets `UV_LINK_MODE=copy` for you (works around a Windows-only
@@ -48,16 +62,22 @@ The script is idempotent for the scaffolding steps (skips work already done)
 but always re-applies on `deploy` - that's how you push a code change to an
 already-deployed agent. It:
 
-1. Runs `agentcore create` to scaffold `agentcore-project/UtilityBot/` (a CDK app the CLI manages - gitignored, regenerate anytime with this script).
-2. Copies `main.py`, `mcp_providers.py`, `steering_handlers.py`, `hooks.py`, and `skills/` into `agentcore-project/UtilityBot/app/UtilityAgent/`.
+1. Runs `agentcore create` to scaffold `agentcore-project/MoversHelperAgent/` (a CDK app the CLI manages - gitignored, regenerate anytime with this script).
+2. Copies `main.py`, `mcp_providers.py`, `steering_handlers.py`, `hooks.py`, and `skills/` into `agentcore-project/MoversHelperAgent/app/MoversHelperAgent/`.
 3. Runs `uv init` / `uv add` in that folder to produce the `pyproject.toml` the CodeZip build needs.
 4. Runs `agentcore add agent` to register it as a "Bring your own code" Strands agent on Bedrock.
 5. Runs `agentcore deploy -y` to synthesize and apply the CloudFormation stack.
+6. Runs `scripts/deploy_rate_limiter.py` to provision the rate limiter's Lambda + DynamoDB table and grant the agent's execution role permission to invoke it (best-effort auto-discovery of that role; prints a manual `aws iam put-role-policy` command if it can't find it).
+
+On `--teardown`, step 6 runs in reverse *first* (removing the inline policy
+it added, and the Lambda/table/role it created) - the invoke-permission
+policy has to be gone before IAM will let `agentcore deploy`'s teardown
+delete the runtime's execution role.
 
 ### Invoke it
 
 ```bash
-cd agentcore-project/UtilityBot
+cd agentcore-project/MoversHelperAgent
 agentcore invoke "What electricity plans are available in zip code 78701?"
 
 # Keep context across calls with --session-id (must be >= 33 characters)
@@ -84,7 +104,7 @@ print("".join(chunk.decode("utf-8") for chunk in response.get("response", [])))
 ### Check status and logs
 
 ```bash
-cd agentcore-project/UtilityBot
+cd agentcore-project/MoversHelperAgent
 agentcore status
 agentcore logs
 ```

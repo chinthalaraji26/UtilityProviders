@@ -56,7 +56,11 @@ def main():
         payload=json.dumps({"prompt": args.prompt}).encode(),
         qualifier="DEFAULT",
     )
-    result = "".join(chunk.decode("utf-8") for chunk in response["response"])
+    # Join raw bytes across all chunks before decoding once - a multi-byte
+    # UTF-8 character (the model streams emoji sometimes) can land split
+    # across a chunk boundary, and decoding each chunk independently breaks
+    # mid-sequence in that case.
+    result = b"".join(response["response"]).decode("utf-8")
 
     print(result)
     print(f"\n--- session id (pass to --session-id to continue this conversation): {session_id} ---", file=sys.stderr)

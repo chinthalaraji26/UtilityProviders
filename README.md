@@ -1,4 +1,4 @@
-# Utility Bot
+# Movers Helper Agent
 
 An AI agent, built with the [Strands Agents](https://strandsagents.com/) SDK,
 that helps a customer search real Texas utility plans, compare them, and

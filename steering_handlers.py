@@ -1,4 +1,4 @@
-"""Steering guardrails for the Utility Bot.
+"""Steering guardrails for the Movers Helper Agent.
 
 Two handlers, following the Module 3 (Skills + Steering) pattern from the
 Strands Agents Hands-On Workshop:
@@ -78,7 +78,7 @@ class ToneGuardrailHandler(LLMSteeringHandler):
 
     def __init__(self):
         super().__init__(
-            system_prompt="""You are evaluating Utility Bot's responses.
+            system_prompt="""You are evaluating Movers Helper Agent's responses.
 Ensure the agent follows these communication guidelines:
 
 - Never state a provider, rate, or promotion that wasn't returned by a tool call - no inventing details.
@@ -99,6 +99,22 @@ If the agent violates any of these, provide specific guidance on what to fix."""
         action_type = type(result).__name__
         print(f"[TONE] {'✅ Tone OK' if action_type == 'Proceed' else '⚠️  Tone guided: ' + getattr(result, 'reason', '')}")
         return result
+
+    async def steer_before_tool(self, **kwargs) -> ToolSteeringAction:
+        """Always proceed - this handler reviews response tone, not tool calls.
+
+        LLMSteeringHandler provides a default steer_before_tool that would
+        otherwise run every tool call through this class's tone-focused
+        system_prompt too, which isn't what that prompt is written to judge.
+        In practice it can decide a tool call's inputs look suspicious and
+        raise Interrupt - a valid steering outcome, but one main.py's
+        invoke() has no human-in-the-loop handling for, so an interrupt's
+        raw internal representation would leak straight into the
+        customer-facing response instead of being resolved. Overriding this
+        to a no-op keeps tool-call gating solely EnrollmentConfirmationHandler's
+        job, which is what it's actually designed and tested for.
+        """
+        return Proceed(reason="ToneGuardrailHandler only reviews response tone, not tool calls")
 
 
 tone_handler = ToneGuardrailHandler()
